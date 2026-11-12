@@ -35,14 +35,21 @@ class EventTest extends TestCase
     public function testConsumeDispatchesDecodedDtoAndSuppressesFilteredResponsesWithoutNetworkStartup(): void
     {
         $current = new BinLogCurrent();
-        $connection = new class ([
+        $connection = new class([
             EventPacket::response(ConstEventType::QUERY_EVENT->value, EventPacket::query('SELECT 1'), 120, true),
-            EventPacket::response(ConstEventType::GTID_LOG_EVENT->value, "\x01" . hex2bin('00112233445566778899aabbccddeeff') . pack('P', 9), 200, true),
+            EventPacket::response(
+                ConstEventType::GTID_LOG_EVENT->value,
+                "\x01" . hex2bin('00112233445566778899aabbccddeeff') . pack('P', 9),
+                200,
+                true
+            ),
             "\xfe",
             EventPacket::response(250, 'unknown', 300, true),
         ], $current) extends BinLogSocketConnect {
-            public function __construct(private array $responses, private readonly BinLogCurrent $current)
-            {
+            public function __construct(
+                private array $responses,
+                private readonly BinLogCurrent $current
+            ) {
                 // Supply already unframed responses without the parent's network startup.
             }
 
@@ -73,7 +80,11 @@ class EventTest extends TestCase
         $config = (new ConfigBuilder())->withEventsIgnore([ConstEventType::GTID_LOG_EVENT->value])->build();
         $serverInfo = EventPacket::serverInfo();
         $rowFactory = new RowEventFactory(new RowEventBuilder(
-            $this->createMock(RepositoryInterface::class), $cache, $config, $serverInfo, new NullLogger()
+            $this->createMock(RepositoryInterface::class),
+            $cache,
+            $config,
+            $serverInfo,
+            new NullLogger()
         ));
         $event = new Event($connection, $rowFactory, $dispatcher, $cache, $config, $serverInfo);
 
