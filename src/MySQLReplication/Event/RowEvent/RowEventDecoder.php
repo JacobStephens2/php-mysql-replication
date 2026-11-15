@@ -73,6 +73,7 @@ readonly class RowEventDecoder
                 $binaryDataReader,
                 $bodyEndBytes,
                 false,
+                $eventInfo->type === ConstEventType::WRITE_ROWS_EVENT_V2->value,
                 static fn (TableMap $tableMap, array $values): WriteRowsDTO => new WriteRowsDTO(
                     $eventInfo,
                     $tableMap,
@@ -86,6 +87,7 @@ readonly class RowEventDecoder
                 $binaryDataReader,
                 $bodyEndBytes,
                 false,
+                $eventInfo->type === ConstEventType::DELETE_ROWS_EVENT_V2->value,
                 static fn (TableMap $tableMap, array $values): DeleteRowsDTO => new DeleteRowsDTO(
                     $eventInfo,
                     $tableMap,
@@ -99,6 +101,7 @@ readonly class RowEventDecoder
                 $binaryDataReader,
                 $bodyEndBytes,
                 true,
+                $eventInfo->type === ConstEventType::UPDATE_ROWS_EVENT_V2->value,
                 static fn (TableMap $tableMap, array $values): UpdateRowsDTO => new UpdateRowsDTO(
                     $eventInfo,
                     $tableMap,
@@ -209,9 +212,10 @@ readonly class RowEventDecoder
         BinaryDataReader $binaryDataReader,
         int $bodyEndBytes,
         bool $isUpdate,
+        bool $isV2,
         callable $makeDto
     ): ?RowsDTO {
-        $tableMap = $this->findTableMap($eventInfo, $binaryDataReader);
+        $tableMap = $this->findTableMap($binaryDataReader, $isV2);
         if ($tableMap === null) {
             return null;
         }
@@ -264,12 +268,12 @@ readonly class RowEventDecoder
         foreach ($tableMap->columnDTOCollection as $i => $columnDTO) {
             $name = $columnDTO->getName();
 
-            if ($this->bitGet($colsBitmap, $i) === 0) {
+            if (!$this->isBitSet($colsBitmap, $i)) {
                 $values[$name] = null;
                 continue;
             }
 
-            if ($this->checkNull($nullBitmap, $nullBitmapIndex)) {
+            if ($this->isBitSet($nullBitmap, $nullBitmapIndex)) {
                 $values[$name] = null;
             } else {
                 $values[$name] = $this->decodeColumnValue($columnDTO, $binaryDataReader);
@@ -303,13 +307,12 @@ readonly class RowEventDecoder
             ConstFieldType::FLOAT => round($binaryDataReader->readFloat(), 4),
             ConstFieldType::DOUBLE => $binaryDataReader->readDouble(),
             ConstFieldType::VARCHAR,
-            ConstFieldType::STRING => $this->getString(
-                $columnDTO->maxLength > 255 ? 2 : 1,
-                $binaryDataReader
+            ConstFieldType::STRING => $binaryDataReader->readLengthString(
+                $columnDTO->maxLength > 255 ? 2 : 1
             ),
             ConstFieldType::NEWDECIMAL => $this->getDecimal($columnDTO, $binaryDataReader),
             ConstFieldType::BLOB,
-            ConstFieldType::GEOMETRY => $this->getString($columnDTO->lengthSize, $binaryDataReader),
+            ConstFieldType::GEOMETRY => $binaryDataReader->readLengthString($columnDTO->lengthSize),
             ConstFieldType::DATETIME => $this->getDatetime($binaryDataReader),
             ConstFieldType::DATETIME2 => $this->getDatetime2($columnDTO, $binaryDataReader),
             ConstFieldType::TIMESTAMP => date('Y-m-d H:i:s', $binaryDataReader->readUInt32()),
@@ -322,7 +325,7 @@ readonly class RowEventDecoder
             ConstFieldType::SET => $this->getSet($columnDTO, $binaryDataReader),
             ConstFieldType::BIT => $this->getBit($columnDTO, $binaryDataReader),
             ConstFieldType::JSON => JsonBinaryDecoderService::makeJsonBinaryDecoder(
-                $this->getString($columnDTO->lengthSize, $binaryDataReader)
+                $binaryDataReader->readLengthString($columnDTO->lengthSize)
             )->parseToString(),
             default => throw new MySQLReplicationException('Unknown row type: ' . $columnDTO->type),
         };
@@ -333,11 +336,6 @@ readonly class RowEventDecoder
         $binaryDataReader->advance($columnDTO->lengthSize);
 
         return null;
-    }
-
-    private function getString(int $size, BinaryDataReader $binaryDataReader): string
-    {
-        return $binaryDataReader->readLengthString($size);
     }
 
     /**
@@ -628,35 +626,17 @@ readonly class RowEventDecoder
         return $n;
     }
 
-    private function bitGet(string $bitmap, int $position): int
+    private function isBitSet(string $bitmap, int $position): bool
     {
-        return $this->getBitFromBitmap($bitmap, $position) & (1 << ($position & 7));
+        return 0 !== (ord($bitmap[(int)($position / 8)]) & (1 << ($position & 7)));
     }
 
-    private function getBitFromBitmap(string $bitmap, int $position): int
-    {
-        return ord($bitmap[(int)($position / 8)]);
-    }
-
-    private function checkNull(string $nullBitmap, int $position): int
-    {
-        return $this->getBitFromBitmap($nullBitmap, $position) & (1 << ($position % 8));
-    }
-
-    private function findTableMap(EventInfo $eventInfo, BinaryDataReader $binaryDataReader): ?TableMap
+    private function findTableMap(BinaryDataReader $binaryDataReader, bool $isV2): ?TableMap
     {
         $tableId = $binaryDataReader->readTableId();
         $binaryDataReader->advance(2);
 
-        if (in_array(
-            $eventInfo->type,
-            [
-                ConstEventType::DELETE_ROWS_EVENT_V2->value,
-                ConstEventType::WRITE_ROWS_EVENT_V2->value,
-                ConstEventType::UPDATE_ROWS_EVENT_V2->value,
-            ],
-            true
-        )) {
+        if ($isV2) {
             $binaryDataReader->read((int)($binaryDataReader->readUInt16() / 8));
         }
 
