@@ -13,8 +13,7 @@ use MySQLReplication\Event\DTO\EventDTO;
 use MySQLReplication\Event\DTO\FormatDescriptionEventDTO;
 use MySQLReplication\Event\DTO\HeartbeatDTO;
 use MySQLReplication\Event\DTO\QueryDTO;
-use MySQLReplication\Event\RowEvent\RowEventFactory;
-use Psr\SimpleCache\CacheInterface;
+use MySQLReplication\Event\RowEvent\RowEventDecoder;
 
 readonly class EventDecoder
 {
@@ -23,8 +22,7 @@ readonly class EventDecoder
     private const EOF_HEADER_VALUE = 254;
 
     public function __construct(
-        private RowEventFactory $rowEventFactory,
-        private CacheInterface $cache,
+        private RowEventDecoder $rowEventDecoder,
         private Config $config,
         private BinLogServerInfo $binLogServerInfo,
         private bool $checkSum,
@@ -57,12 +55,11 @@ readonly class EventDecoder
         // we always need these events to clean table maps and for BinLogCurrent class to keep track of binlog position
         // always parse table map event but propagate when needed (we need this for creating table cache)
         if ($eventInfo->type === ConstEventType::TABLE_MAP_EVENT->value) {
-            return $this->rowEventFactory->makeRowEvent($binaryDataReader, $eventInfo)
-                ->makeTableMapDTO();
+            return $this->rowEventDecoder->decode($eventInfo, $binaryDataReader);
         }
 
         if ($eventInfo->type === ConstEventType::ROTATE_EVENT->value) {
-            $this->cache->clear();
+            $this->rowEventDecoder->clearTableMaps();
             return (new RotateEvent($eventInfo, $binaryDataReader, $this->binLogServerInfo))->makeRotateEventDTO();
         }
 
@@ -89,29 +86,17 @@ readonly class EventDecoder
 
         if (in_array(
             $eventInfo->type,
-            [ConstEventType::UPDATE_ROWS_EVENT_V1->value, ConstEventType::UPDATE_ROWS_EVENT_V2->value],
+            [
+                ConstEventType::WRITE_ROWS_EVENT_V1->value,
+                ConstEventType::WRITE_ROWS_EVENT_V2->value,
+                ConstEventType::UPDATE_ROWS_EVENT_V1->value,
+                ConstEventType::UPDATE_ROWS_EVENT_V2->value,
+                ConstEventType::DELETE_ROWS_EVENT_V1->value,
+                ConstEventType::DELETE_ROWS_EVENT_V2->value,
+            ],
             true
         )) {
-            return $this->rowEventFactory->makeRowEvent($binaryDataReader, $eventInfo)
-                ->makeUpdateRowsDTO();
-        }
-
-        if (in_array(
-            $eventInfo->type,
-            [ConstEventType::WRITE_ROWS_EVENT_V1->value, ConstEventType::WRITE_ROWS_EVENT_V2->value],
-            true
-        )) {
-            return $this->rowEventFactory->makeRowEvent($binaryDataReader, $eventInfo)
-                ->makeWriteRowsDTO();
-        }
-
-        if (in_array(
-            $eventInfo->type,
-            [ConstEventType::DELETE_ROWS_EVENT_V1->value, ConstEventType::DELETE_ROWS_EVENT_V2->value],
-            true
-        )) {
-            return $this->rowEventFactory->makeRowEvent($binaryDataReader, $eventInfo)
-                ->makeDeleteRowsDTO();
+            return $this->rowEventDecoder->decode($eventInfo, $binaryDataReader);
         }
 
         if ($eventInfo->type === ConstEventType::XID_EVENT->value) {

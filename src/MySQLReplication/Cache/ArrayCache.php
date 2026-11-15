@@ -9,7 +9,7 @@ use Psr\SimpleCache\CacheInterface;
 
 class ArrayCache implements CacheInterface
 {
-    private static array $tableMapCache = [];
+    private array $tableMapCache = [];
 
     public function __construct(
         private readonly int $tableCacheSize = 0
@@ -18,17 +18,17 @@ class ArrayCache implements CacheInterface
 
     public function get(string $key, mixed $default = null): mixed
     {
-        return $this->has($key) ? self::$tableMapCache[$key] : $default;
+        return $this->has($key) ? $this->tableMapCache[$key] : $default;
     }
 
     public function has($key): bool
     {
-        return isset(self::$tableMapCache[$key]);
+        return isset($this->tableMapCache[$key]);
     }
 
     public function clear(): bool
     {
-        self::$tableMapCache = [];
+        $this->tableMapCache = [];
 
         return true;
     }
@@ -38,7 +38,7 @@ class ArrayCache implements CacheInterface
         $data = [];
         foreach ($keys as $key) {
             if ($this->has($key)) {
-                $data[$key] = self::$tableMapCache[$key];
+                $data[$key] = $this->tableMapCache[$key];
             }
         }
 
@@ -57,11 +57,11 @@ class ArrayCache implements CacheInterface
     public function set(string $key, mixed $value, null|int|DateInterval $ttl = null): bool
     {
         // automatically clear table cache to save memory
-        if (count(self::$tableMapCache) > $this->tableCacheSize) {
-            self::$tableMapCache = array_slice(self::$tableMapCache, (int)($this->tableCacheSize / 2), null, true);
+        if (count($this->tableMapCache) > $this->tableCacheSize) {
+            $this->tableMapCache = array_slice($this->tableMapCache, (int)($this->tableCacheSize / 2), null, true);
         }
 
-        self::$tableMapCache[$key] = $value;
+        $this->tableMapCache[$key] = $value;
 
         return true;
     }
@@ -77,7 +77,7 @@ class ArrayCache implements CacheInterface
 
     public function delete(string $key): bool
     {
-        unset(self::$tableMapCache[$key]);
+        unset($this->tableMapCache[$key]);
 
         return true;
     }

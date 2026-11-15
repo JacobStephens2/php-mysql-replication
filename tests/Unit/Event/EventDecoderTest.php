@@ -22,8 +22,7 @@ use MySQLReplication\Event\DTO\UpdateRowsDTO;
 use MySQLReplication\Event\DTO\WriteRowsDTO;
 use MySQLReplication\Event\DTO\XidDTO;
 use MySQLReplication\Event\EventDecoder;
-use MySQLReplication\Event\RowEvent\RowEventBuilder;
-use MySQLReplication\Event\RowEvent\RowEventFactory;
+use MySQLReplication\Event\RowEvent\RowEventDecoder;
 use MySQLReplication\Repository\FieldDTO;
 use MySQLReplication\Repository\FieldDTOCollection;
 use MySQLReplication\Repository\RepositoryInterface;
@@ -422,8 +421,7 @@ class EventDecoderTest extends TestCase
         $repository ??= $this->createMock(RepositoryInterface::class);
 
         return new EventDecoder(
-            new RowEventFactory(new RowEventBuilder($repository, $this->cache, $config, $serverInfo, new NullLogger())),
-            $this->cache,
+            new RowEventDecoder($repository, $this->cache, $config, new NullLogger()),
             $config,
             $serverInfo,
             $checksum,
