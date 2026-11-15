@@ -238,17 +238,15 @@ class BinLogSocketConnect
         $host = (string)gethostname();
         $hostLength = strlen($host);
         $userLength = strlen($this->config->user);
-        $passLength = strlen($this->config->password);
 
-        $data = pack('l', 18 + $hostLength + $userLength + $passLength);
+        $data = pack('l', 18 + $hostLength + $userLength);
         $data .= chr(self::COM_REGISTER_SLAVE);
         $data .= pack('V', $this->config->slaveId);
         $data .= pack('C', $hostLength);
         $data .= $host;
         $data .= pack('C', $userLength);
         $data .= $this->config->user;
-        $data .= pack('C', $passLength);
-        $data .= $this->config->password;
+        $data .= chr(0); // Registration does not need the authentication password.
         $data .= pack('v', $this->config->port);
         $data .= pack('V', 0);
         $data .= pack('V', 0);
