@@ -12,8 +12,8 @@ use MySQLReplication\Definitions\ConstEventType;
 use MySQLReplication\Event\DTO\EventDTO;
 use MySQLReplication\Event\DTO\QueryDTO;
 use MySQLReplication\Event\Event;
-use MySQLReplication\Event\RowEvent\RowEventBuilder;
-use MySQLReplication\Event\RowEvent\RowEventFactory;
+use MySQLReplication\Event\EventDecoder;
+use MySQLReplication\Event\RowEvent\RowEventDecoder;
 use MySQLReplication\Repository\RepositoryInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
@@ -22,16 +22,6 @@ use Symfony\Component\EventDispatcher\EventDispatcher;
 
 class EventTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        (new ArrayCache())->clear();
-    }
-
-    protected function tearDown(): void
-    {
-        (new ArrayCache())->clear();
-    }
-
     public function testConsumeDispatchesDecodedDtoAndSuppressesFilteredResponsesWithoutNetworkStartup(): void
     {
         $current = new BinLogCurrent();
@@ -79,14 +69,20 @@ class EventTest extends TestCase
         $cache = new ArrayCache();
         $config = (new ConfigBuilder())->withEventsIgnore([ConstEventType::GTID_LOG_EVENT->value])->build();
         $serverInfo = EventPacket::serverInfo();
-        $rowFactory = new RowEventFactory(new RowEventBuilder(
+        $rowEventDecoder = new RowEventDecoder(
             $this->createMock(RepositoryInterface::class),
             $cache,
             $config,
-            $serverInfo,
             new NullLogger()
-        ));
-        $event = new Event($connection, $rowFactory, $dispatcher, $cache, $config, $serverInfo);
+        );
+        $eventDecoder = new EventDecoder(
+            $rowEventDecoder,
+            $config,
+            $serverInfo,
+            $connection->getCheckSum(),
+            $current
+        );
+        $event = new Event($connection, $eventDecoder, $dispatcher);
 
         $event->consume();
         self::assertCount(1, $events);

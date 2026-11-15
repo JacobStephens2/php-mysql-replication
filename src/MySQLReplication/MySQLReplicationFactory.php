@@ -11,8 +11,8 @@ use MySQLReplication\BinLog\BinLogSocketConnect;
 use MySQLReplication\Cache\ArrayCache;
 use MySQLReplication\Config\Config;
 use MySQLReplication\Event\Event;
-use MySQLReplication\Event\RowEvent\RowEventBuilder;
-use MySQLReplication\Event\RowEvent\RowEventFactory;
+use MySQLReplication\Event\EventDecoder;
+use MySQLReplication\Event\RowEvent\RowEventDecoder;
 use MySQLReplication\Repository\MySQLRepository;
 use MySQLReplication\Repository\RepositoryInterface;
 use MySQLReplication\Socket\Socket;
@@ -65,19 +65,19 @@ class MySQLReplicationFactory
 
         $this->event = new Event(
             $this->binLogSocketConnect,
-            new RowEventFactory(
-                new RowEventBuilder(
+            new EventDecoder(
+                new RowEventDecoder(
                     $repository,
                     $cache,
                     $config,
-                    $this->binLogSocketConnect->getBinLogServerInfo(),
                     $logger
-                )
+                ),
+                $config,
+                $this->binLogSocketConnect->getBinLogServerInfo(),
+                $this->binLogSocketConnect->getCheckSum(),
+                $this->binLogSocketConnect->getBinLogCurrent()
             ),
-            $this->eventDispatcher,
-            $cache,
-            $config,
-            $this->binLogSocketConnect->getBinLogServerInfo()
+            $this->eventDispatcher
         );
     }
 
