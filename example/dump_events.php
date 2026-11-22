@@ -25,7 +25,7 @@ $binLogStream = new MySQLReplicationFactory(
         ->withHost('127.0.0.1')
         ->withPassword('root')
         ->withPort(3306)
-        // Omit both trust-anchor calls to use the runtime default trust store. The host check still runs.
+        // The local server certificate names 127.0.0.1 and chains to this trust anchor.
         ->withTrustAnchorFile(__DIR__ . '/../.mysql-certs/ca.pem')
         ->withHeartbeatPeriod(60)
         ->withEventsIgnore([ConstEventType::HEARTBEAT_LOG_EVENT->value])

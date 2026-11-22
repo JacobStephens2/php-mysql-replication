@@ -48,7 +48,7 @@ class benchmark
                 ->withPassword(self::DB_PASS)
                 ->withHost(self::DB_HOST)
                 ->withPort(self::DB_PORT)
-                // Omit both trust-anchor calls to use the runtime default trust store. The host check still runs.
+                // The local server certificate names 127.0.0.1 and chains to this trust anchor.
                 ->withTrustAnchorFile(self::TRUST_ANCHOR_FILE)
                 ->withEventsOnly(
                     [
