@@ -34,6 +34,13 @@ class GtidCollectionTest extends TestCase
         self::assertSame(strlen($set->getEncoded()), $set->getEncodedLength());
     }
 
+    public function testEncodedLengthRemainsAvailableForSingletonAtIntegerLimit(): void
+    {
+        $set = GtidCollection::makeCollectionFromString('00112233-4455-6677-8899-aabbccddeeff:' . PHP_INT_MAX);
+
+        self::assertSame(48, $set->getEncodedLength());
+    }
+
     public function testShouldGetEncoded(): void
     {
         self::assertSame(
