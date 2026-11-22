@@ -22,9 +22,11 @@ use MySQLReplication\MySQLReplicationFactory;
 $binLogStream = new MySQLReplicationFactory(
     (new ConfigBuilder())
         ->withUser('root')
-        ->withHost('0.0.0.0')
+        ->withHost('127.0.0.1')
         ->withPassword('root')
         ->withPort(3306)
+        // The local server certificate names 127.0.0.1 and chains to this trust anchor.
+        ->withTrustAnchorFile(__DIR__ . '/../.mysql-certs/ca.pem')
         ->withHeartbeatPeriod(60)
         ->withEventsIgnore([ConstEventType::HEARTBEAT_LOG_EVENT->value])
         ->build(),

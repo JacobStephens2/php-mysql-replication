@@ -22,4 +22,8 @@ class ConfigException extends MySQLReplicationException
     public const PORT_ERROR_CODE = 402;
     public const IP_ERROR_MESSAGE = 'Incorrect IP given';
     public const IP_ERROR_CODE = 401;
+    public const TRUST_ANCHOR_FILE_ERROR_MESSAGE = 'Trust anchor file is not readable';
+    public const TRUST_ANCHOR_FILE_ERROR_CODE = 415;
+    public const TRUST_ANCHOR_DIRECTORY_ERROR_MESSAGE = 'Trust anchor directory is not readable';
+    public const TRUST_ANCHOR_DIRECTORY_ERROR_CODE = 416;
 }

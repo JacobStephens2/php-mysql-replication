@@ -15,6 +15,7 @@
     "php": ">=8.2",
     "ext-bcmath": "*",
     "ext-json": "*",
+    "ext-openssl": "*",
     "ext-sockets": "*",
     "doctrine/collections": "^2.1",
     "doctrine/dbal": "^4.0",

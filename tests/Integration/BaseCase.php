@@ -36,11 +36,20 @@ abstract class BaseCase extends TestCase
     {
         parent::setUp();
 
+        $trustAnchorFile = dirname(__DIR__, 2) . '/.mysql-certs/ca.pem';
+        if (!is_file($trustAnchorFile) || !is_readable($trustAnchorFile)) {
+            self::fail(
+                'Missing MySQL trust anchor at ' . $trustAnchorFile
+                . '. Run sh docker/mysql-tls-certificates.sh .mysql-certs before the integration tests.'
+            );
+        }
+
         $this->configBuilder = (new ConfigBuilder())
             ->withUser('root')
-            ->withHost('0.0.0.0')
+            ->withHost('127.0.0.1')
             ->withPassword('root')
             ->withPort(3306)
+            ->withTrustAnchorFile($trustAnchorFile)
             ->withEventsIgnore($this->getIgnoredEvents());
 
         $this->connect();

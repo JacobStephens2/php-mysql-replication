@@ -1,9 +1,25 @@
 services:
+  mysql-certs:
+    image: alpine:3.20
+    container_name: replication-test-mysql-certs
+    volumes:
+      - ./.mysql-certs:/certs
+      - ./docker/mysql-tls-certificates.sh:/mysql-tls-certificates.sh:ro
+    entrypoint: ["/bin/sh", "/mysql-tls-certificates.sh", "/certs"]
+
   replication-test-mysql-percona:
     container_name: replication-test-mysql-percona
     hostname: replication-test-mysql-percona
     image: mysql:8.0
     platform: linux/amd64
+    depends_on:
+      mysql-certs:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "/mysql-tls-entrypoint.sh"]
+    volumes:
+      - ./.mysql-certs:/etc/mysql/certs
+      - ./docker/mysql-tls-entrypoint.sh:/mysql-tls-entrypoint.sh:ro
+    # TLS is available and not required, so the metadata SQL connection stays unencrypted.
     command: [
       '--character-set-server=utf8mb4',
       '--collation-server=utf8mb4_unicode_ci',
@@ -13,7 +29,10 @@ services:
       '--max_binlog_size=8M',
       '--binlog_format=row',
       '--server-id=1',
-      '--binlog_rows_query_log_events=ON'
+      '--binlog_rows_query_log_events=ON',
+      '--ssl-ca=/etc/mysql/certs/ca.pem',
+      '--ssl-cert=/etc/mysql/certs/server-cert.pem',
+      '--ssl-key=/etc/mysql/certs/server-key.pem'
     ]
     environment:
       - MYSQL_ROOT_PASSWORD=root

@@ -23,6 +23,8 @@ $binLogStream = new MySQLReplicationFactory(
         ->withHost('127.0.0.1')
         ->withPort(3306)
         ->withPassword('root')
+        // The local server certificate names 127.0.0.1 and chains to this trust anchor.
+        ->withTrustAnchorFile(__DIR__ . '/../.mysql-certs/ca.pem')
         ->build()
 );
 
