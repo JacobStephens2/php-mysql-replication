@@ -87,10 +87,7 @@ class BinLogSocketConnect
             ++$sequenceId;
         }
 
-        $data = pack('L', self::getCapabilities());
-        $data .= pack('L', self::AUTH_MAX_PACKET_SIZE);
-        $data .= chr(self::HANDSHAKE_CHARSET);
-        $data .= str_repeat(chr(0), self::HANDSHAKE_FILLER_LENGTH);
+        $data = $this->handshakePreface(self::getCapabilities());
         $data .= $this->config->user . chr(0);
         $auth = $this->getAuthData($authPlugin, $this->binLogServerInfo->salt);
         $data .= chr(strlen($auth)) . $auth;
@@ -136,6 +133,20 @@ class BinLogSocketConnect
     }
 
     /**
+     * Capability flags, max packet size, character set, and the reserved filler.
+     * Credentials are appended only on the client authentication handshake.
+     */
+    private function handshakePreface(int $capabilities): string
+    {
+        $data = pack('L', $capabilities);
+        $data .= pack('L', self::AUTH_MAX_PACKET_SIZE);
+        $data .= chr(self::HANDSHAKE_CHARSET);
+        $data .= str_repeat(chr(0), self::HANDSHAKE_FILLER_LENGTH);
+
+        return $data;
+    }
+
+    /**
      * https://dev.mysql.com/doc/dev/mysql-server/latest/group__group__cs__capabilities__flags.html
      * https://github.com/siddontang/mixer/blob/master/doc/protocol.txt
      */
@@ -164,10 +175,7 @@ class BinLogSocketConnect
             );
         }
 
-        $data = pack('L', self::getCapabilities() | self::CLIENT_SSL);
-        $data .= pack('L', self::AUTH_MAX_PACKET_SIZE);
-        $data .= chr(self::HANDSHAKE_CHARSET);
-        $data .= str_repeat(chr(0), self::HANDSHAKE_FILLER_LENGTH);
+        $data = $this->handshakePreface(self::getCapabilities() | self::CLIENT_SSL);
         $this->packetStream->writePayload($data, $sequenceId);
         $this->socket->enableTls(
             $this->config->host,

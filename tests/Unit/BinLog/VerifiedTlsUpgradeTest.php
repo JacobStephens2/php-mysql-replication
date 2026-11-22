@@ -42,10 +42,7 @@ class VerifiedTlsUpgradeTest extends TestCase
             $this->greeting(true)
         );
 
-        self::assertNull(
-            $result['exception'],
-            $result['stderr'] . $this->describeWrites($result['writes'])
-        );
+        self::assertNull($result['exception'], $result['stderr'] . $this->describeWrites($result['writes']));
         // Protocol::SSLRequest is 32 bytes at sequence 1: flags 565781 plus CLIENT_SSL (2048),
         // max packet 0xffffff, character set 0x21, and 23 reserved zero bytes. No credentials.
         self::assertSame($this->tlsRequest(), $result['writes'][0]);
@@ -455,9 +452,7 @@ CNF;
     private function hashedDirectory(string $pem, string $directory): string
     {
         mkdir($directory, 0700);
-        $hash = trim((string)shell_exec(
-            'openssl x509 -in ' . escapeshellarg($pem) . ' -noout -subject_hash'
-        ));
+        $hash = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($pem) . ' -noout -subject_hash'));
         self::assertMatchesRegularExpression('/^[0-9a-f]+$/', $hash);
         copy($pem, $directory . '/' . $hash . '.0');
 
