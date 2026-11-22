@@ -13,8 +13,9 @@ final class BinLogPacketStream
     private const HEADER_LENGTH = 4;
     private const MAX_PAYLOAD_LENGTH = 0xffffff;
 
-    public function __construct(private readonly SocketInterface $socket)
-    {
+    public function __construct(
+        private readonly SocketInterface $socket
+    ) {
     }
 
     public function writePayload(string $payload, int $sequenceId = 0): void
@@ -54,7 +55,7 @@ final class BinLogPacketStream
             return null;
         }
 
-        return BinaryDataReader::unpack('V', substr($header, 0, 3) . "\x00")[1];
+        return (new BinaryDataReader($header))->readUInt24();
     }
 
     private function checkResponse(string $response): void

@@ -47,6 +47,6 @@ class Gtid
 
     public function getEncodedLength(): int
     {
-        return 40 * count($this->intervals);
+        return strlen($this->getEncoded());
     }
 }

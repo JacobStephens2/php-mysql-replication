@@ -27,6 +27,13 @@ class GtidCollectionTest extends TestCase
         self::assertSame(88, $this->gtidCollection->getEncodedLength());
     }
 
+    public function testEncodedLengthMatchesSerializedSetWithMultipleIntervals(): void
+    {
+        $set = GtidCollection::makeCollectionFromString('00112233-4455-6677-8899-aabbccddeeff:7:11-15');
+
+        self::assertSame(strlen($set->getEncoded()), $set->getEncodedLength());
+    }
+
     public function testShouldGetEncoded(): void
     {
         self::assertSame(

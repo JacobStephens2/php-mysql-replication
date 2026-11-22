@@ -56,10 +56,7 @@ class BinLogPacketStreamTest extends TestCase
     public function testServerErrorIsRaisedBeforeReadingContinuation(): void
     {
         $message = str_pad('Access denied', 0xffffff - 9, 'x');
-        $stream = $this->streamWithReads([
-            [4, "\xff\xff\xff\x01"],
-            [0xffffff, "\xff\x15\x04#28000" . $message],
-        ]);
+        $stream = $this->streamWithReads([[4, "\xff\xff\xff\x01"], [0xffffff, "\xff\x15\x04#28000" . $message]]);
 
         try {
             $stream->readResponse();
@@ -108,11 +105,7 @@ class BinLogPacketStreamTest extends TestCase
     public function testEmptyContinuationHeaderReturnsDataAlreadyRead(): void
     {
         $firstPacket = "\x00" . str_repeat('a', 0xfffffe);
-        $stream = $this->streamWithReads([
-            [4, "\xff\xff\xff\x01"],
-            [0xffffff, $firstPacket],
-            [4, ''],
-        ]);
+        $stream = $this->streamWithReads([[4, "\xff\xff\xff\x01"], [0xffffff, $firstPacket], [4, '']]);
 
         self::assertSame($firstPacket, $stream->readResponse());
     }
