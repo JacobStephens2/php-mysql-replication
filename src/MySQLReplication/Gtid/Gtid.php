@@ -8,6 +8,9 @@ use MySQLReplication\BinaryDataReader\BinaryDataReader;
 
 class Gtid
 {
+    private const SID_LENGTH = 16;
+    private const INTERVAL_LENGTH = 2 * BinaryDataReader::UNSIGNED_INT64_LENGTH;
+
     private array $intervals = [];
     private string $sid;
 
@@ -47,6 +50,8 @@ class Gtid
 
     public function getEncodedLength(): int
     {
-        return 40 * count($this->intervals);
+        return self::SID_LENGTH
+            + BinaryDataReader::UNSIGNED_INT64_LENGTH
+            + self::INTERVAL_LENGTH * count($this->intervals);
     }
 }
