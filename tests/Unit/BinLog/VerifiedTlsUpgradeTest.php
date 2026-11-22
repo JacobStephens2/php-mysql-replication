@@ -328,31 +328,11 @@ PHP);
         array $anchors,
         string $greeting
     ): array {
-        $directory = $this->workDirectory();
-        $ready = $directory . '/ready-' . bin2hex(random_bytes(3));
-        $stderr = $directory . '/stderr-' . bin2hex(random_bytes(3));
-        $sniFile = $directory . '/sni-' . bin2hex(random_bytes(3));
-        $script = $directory . '/endpoint.php';
-        if (!is_file($script)) {
-            file_put_contents($script, $this->endpointScript());
-        }
         $bind = $host === 'localhost' ? 'tcp://[::1]:0' : 'tcp://127.0.0.1:0';
-        $environment = getenv();
-        self::assertIsArray($environment);
-        $environment['TLS_MODE'] = $mode;
-        $environment['TLS_BIND'] = $bind;
-        $environment['TLS_CERT'] = $serverPem;
-        $environment['TLS_GREETING'] = base64_encode($greeting);
-        $environment['TLS_READY'] = $ready;
-        $environment['TLS_SNI'] = $sniFile;
-        $process = proc_open([PHP_BINARY, $script], [
-            1 => ['file', '/dev/null', 'w'],
-            2 => ['file', $stderr, 'w'],
-        ], $pipes, null, $environment);
-        self::assertIsResource($process);
+        $endpoint = $this->openEndpoint($mode, $bind, $serverPem, $greeting);
 
         try {
-            $address = $this->waitForFile($ready);
+            $address = $this->waitForFile($endpoint['ready']);
             $socket = new RecordingSocket(new Socket());
             $config = (new ConfigBuilder())
                 ->withHost($host)
@@ -382,15 +362,11 @@ PHP);
             return [
                 'writes' => $writes,
                 'exception' => $exception,
-                'stderr' => is_file($stderr) ? (string)file_get_contents($stderr) : '',
-                'sni' => is_file($sniFile) ? (string)file_get_contents($sniFile) : '',
+                'stderr' => $this->fileContents($endpoint['stderr']),
+                'sni' => $this->fileContents($endpoint['sni']),
             ];
         } finally {
-            $status = proc_get_status($process);
-            if ($status['running']) {
-                proc_terminate($process);
-            }
-            proc_close($process);
+            $this->closeProcess($endpoint['process']);
         }
     }
 
@@ -409,32 +385,14 @@ PHP);
             mkdir($emptyCapath, 0700);
         }
         $runtimeCapath ??= $emptyCapath;
-        $ready = $directory . '/ready-' . bin2hex(random_bytes(3));
-        $serverStderr = $directory . '/stderr-' . bin2hex(random_bytes(3));
-        $script = $directory . '/endpoint.php';
-        if (!is_file($script)) {
-            file_put_contents($script, $this->endpointScript());
-        }
         $clientScript = $directory . '/runtime-client.php';
         if (!is_file($clientScript)) {
             file_put_contents($clientScript, $this->runtimeClientScript());
         }
-        $environment = getenv();
-        self::assertIsArray($environment);
-        $environment['TLS_MODE'] = 'success';
-        $environment['TLS_BIND'] = 'tcp://127.0.0.1:0';
-        $environment['TLS_CERT'] = $serverPem;
-        $environment['TLS_GREETING'] = base64_encode($this->greeting(true));
-        $environment['TLS_READY'] = $ready;
-        $environment['TLS_SNI'] = $directory . '/unused-sni';
-        $server = proc_open([PHP_BINARY, $script], [
-            1 => ['file', '/dev/null', 'w'],
-            2 => ['file', $serverStderr, 'w'],
-        ], $pipes, null, $environment);
-        self::assertIsResource($server);
+        $endpoint = $this->openEndpoint('success', 'tcp://127.0.0.1:0', $serverPem, $this->greeting(true));
 
         try {
-            $address = $this->waitForFile($ready);
+            $address = $this->waitForFile($endpoint['ready']);
             $clientStderr = $directory . '/client-stderr-' . bin2hex(random_bytes(3));
             $client = proc_open([
                 PHP_BINARY,
@@ -455,8 +413,7 @@ PHP);
             $stdout = stream_get_contents($clientPipes[1]);
             fclose($clientPipes[1]);
             $exitCode = proc_close($client);
-            $stderr = (is_file($serverStderr) ? (string)file_get_contents($serverStderr) : '')
-                . (is_file($clientStderr) ? (string)file_get_contents($clientStderr) : '');
+            $stderr = $this->fileContents($endpoint['stderr']) . $this->fileContents($clientStderr);
             self::assertSame(0, $exitCode, $stderr . $stdout);
             $decoded = json_decode((string)$stdout, true);
             self::assertIsArray($decoded, $stderr . $stdout);
@@ -476,12 +433,63 @@ PHP);
                 'anchorDirectory' => (string)$decoded['anchorDirectory'],
             ];
         } finally {
-            $status = proc_get_status($server);
-            if ($status['running']) {
-                proc_terminate($server);
-            }
-            proc_close($server);
+            $this->closeProcess($endpoint['process']);
         }
+    }
+
+    /**
+     * @return array{process: resource, ready: string, stderr: string, sni: string}
+     */
+    private function openEndpoint(string $mode, string $bind, string $serverPem, string $greeting): array
+    {
+        $directory = $this->workDirectory();
+        $ready = $directory . '/ready-' . bin2hex(random_bytes(3));
+        $stderr = $directory . '/stderr-' . bin2hex(random_bytes(3));
+        $sni = $directory . '/sni-' . bin2hex(random_bytes(3));
+        $script = $directory . '/endpoint.php';
+        if (!is_file($script)) {
+            file_put_contents($script, $this->endpointScript());
+        }
+        $environment = getenv();
+        self::assertIsArray($environment);
+        $environment['TLS_MODE'] = $mode;
+        $environment['TLS_BIND'] = $bind;
+        $environment['TLS_CERT'] = $serverPem;
+        $environment['TLS_GREETING'] = base64_encode($greeting);
+        $environment['TLS_READY'] = $ready;
+        $environment['TLS_SNI'] = $sni;
+        $process = proc_open([PHP_BINARY, $script], [
+            1 => ['file', '/dev/null', 'w'],
+            2 => ['file', $stderr, 'w'],
+        ], $pipes, null, $environment);
+        self::assertIsResource($process);
+
+        return [
+            'process' => $process,
+            'ready' => $ready,
+            'stderr' => $stderr,
+            'sni' => $sni,
+        ];
+    }
+
+    /** @param resource $process */
+    private function closeProcess($process): void
+    {
+        $status = proc_get_status($process);
+        if ($status['running']) {
+            proc_terminate($process);
+        }
+        proc_close($process);
+    }
+
+    private function fileContents(string $path): string
+    {
+        if (!is_file($path)) {
+            return '';
+        }
+        $contents = file_get_contents($path);
+
+        return is_string($contents) ? $contents : '';
     }
 
     private function runtimeClientScript(): string
