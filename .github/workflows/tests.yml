@@ -19,6 +19,10 @@ jobs:
       - uses: shogo82148/actions-setup-mysql@v1
         with:
           mysql-version: "${{ matrix.mysql-version }}"
+          # mysqladmin reads [client] ssl_ca and verifies the server certificate.
+          # The action keeps that key when it is already set; otherwise it trusts
+          # its own CA, which does not sign this certificate. The name must be
+          # ssl_ca, the key the action checks.
           my-cnf: |
             server-id=1
             binlog_format=row
@@ -27,6 +31,9 @@ jobs:
             ssl_ca=${{ github.workspace }}/.mysql-certs/ca.pem
             ssl_cert=${{ github.workspace }}/.mysql-certs/server-cert.pem
             ssl_key=${{ github.workspace }}/.mysql-certs/server-key.pem
+
+            [client]
+            ssl_ca=${{ github.workspace }}/.mysql-certs/ca.pem
           root-password: root
 
       - name: set up timezones
