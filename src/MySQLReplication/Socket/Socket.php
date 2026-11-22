@@ -101,9 +101,15 @@ class Socket implements SocketInterface
             );
         }
 
-        // PHP uses openssl.cafile or openssl.capath from php.ini when that context option is omitted,
-        // and the system trust store when both are omitted. An empty stand-in keeps the check on the
-        // configured anchors alone.
+        // With no configured anchor, omit cafile and capath so PHP uses openssl.cafile, openssl.capath,
+        // or the system trust store. The host check still runs. An empty stand-in is only for a
+        // configured anchor, so that anchor is not combined with the runtime store.
+        if ($trustAnchorFile === '' && $trustAnchorDirectory === '') {
+            $this->upgradeSocket($peerName, null, null);
+
+            return;
+        }
+
         $temporaryDirectory = null;
         $temporaryFile = null;
         $cafile = $trustAnchorFile !== ''
@@ -133,19 +139,24 @@ class Socket implements SocketInterface
         }
     }
 
-    private function upgradeSocket(string $peerName, string $cafile, string $capath): void
+    private function upgradeSocket(string $peerName, ?string $cafile, ?string $capath): void
     {
         $isIp = filter_var($peerName, FILTER_VALIDATE_IP) !== false;
+        $ssl = [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+            'peer_name' => $peerName,
+            'SNI_enabled' => !$isIp,
+        ];
+        if ($cafile !== null) {
+            $ssl['cafile'] = $cafile;
+        }
+        if ($capath !== null) {
+            $ssl['capath'] = $capath;
+        }
         $configured = stream_context_set_option($this->openSocket(), [
-            'ssl' => [
-                'verify_peer' => true,
-                'verify_peer_name' => true,
-                'allow_self_signed' => false,
-                'peer_name' => $peerName,
-                'SNI_enabled' => !$isIp,
-                'cafile' => $cafile,
-                'capath' => $capath,
-            ],
+            'ssl' => $ssl,
         ]);
         if ($configured !== true) {
             throw new SocketException(

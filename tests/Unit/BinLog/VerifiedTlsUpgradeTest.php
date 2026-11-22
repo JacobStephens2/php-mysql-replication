@@ -256,6 +256,67 @@ PHP);
         self::assertFalse($decoded['iniDirectoryTrusted'], $stderr);
     }
 
+    public function testUnsetTrustAnchorTrustsTheRuntimeStoreAndThenAuthenticates(): void
+    {
+        $issued = $this->issue('IP:127.0.0.1');
+        $result = $this->startupWithRuntimeStore(
+            '127.0.0.1',
+            $issued['serverPem'],
+            $issued['caPem']
+        );
+
+        self::assertNull($result['code'], $result['message'] . $result['stderr']);
+        self::assertSame('', $result['anchorFile']);
+        self::assertSame('', $result['anchorDirectory']);
+        self::assertSame($this->tlsRequest(), $result['writes'][0]);
+        self::assertSame($this->authenticationPacket(), $result['writes'][1]);
+    }
+
+    public function testUnsetTrustAnchorTrustsARuntimeCapathAndThenAuthenticates(): void
+    {
+        $issued = $this->issue('IP:127.0.0.1');
+        $result = $this->startupWithRuntimeStore(
+            '127.0.0.1',
+            $issued['serverPem'],
+            $issued['otherCaPem'],
+            $issued['capath']
+        );
+
+        self::assertNull($result['code'], $result['message'] . $result['stderr']);
+        self::assertSame('', $result['anchorFile']);
+        self::assertSame('', $result['anchorDirectory']);
+        self::assertSame($this->tlsRequest(), $result['writes'][0]);
+        self::assertSame($this->authenticationPacket(), $result['writes'][1]);
+    }
+
+    public function testUnsetTrustAnchorRejectsAnotherNameBeforeClientAuthentication(): void
+    {
+        $issued = $this->issue('DNS:other.example');
+        $result = $this->startupWithRuntimeStore(
+            '127.0.0.1',
+            $issued['serverPem'],
+            $issued['caPem']
+        );
+
+        self::assertSame(SocketException::SOCKET_TLS_FAILED_CODE, $result['code'], $result['message']);
+        self::assertSame([$this->tlsRequest()], $result['writes']);
+        self::assertSame('', $result['anchorFile']);
+        self::assertSame('', $result['anchorDirectory']);
+    }
+
+    public function testUnsetTrustAnchorRejectsAnIssuerOutsideTheRuntimeStoreBeforeClientAuthentication(): void
+    {
+        $issued = $this->issue('IP:127.0.0.1');
+        $result = $this->startupWithRuntimeStore(
+            '127.0.0.1',
+            $issued['untrustedServerPem'],
+            $issued['caPem']
+        );
+
+        self::assertSame(SocketException::SOCKET_TLS_FAILED_CODE, $result['code'], $result['message']);
+        self::assertSame([$this->tlsRequest()], $result['writes']);
+    }
+
     /**
      * @param array{file: string, directory: string} $anchors
      * @return array{writes: list<string>, exception: ?MySQLReplicationException, stderr: string, sni: string}
@@ -331,6 +392,199 @@ PHP);
             }
             proc_close($process);
         }
+    }
+
+    /**
+     * @return array{writes: list<string>, code: ?int, message: string, stderr: string, anchorFile: string, anchorDirectory: string}
+     */
+    private function startupWithRuntimeStore(
+        string $host,
+        string $serverPem,
+        string $runtimeCafile,
+        ?string $runtimeCapath = null
+    ): array {
+        $directory = $this->workDirectory();
+        $emptyCapath = $directory . '/empty-capath';
+        if (!is_dir($emptyCapath)) {
+            mkdir($emptyCapath, 0700);
+        }
+        $runtimeCapath ??= $emptyCapath;
+        $ready = $directory . '/ready-' . bin2hex(random_bytes(3));
+        $serverStderr = $directory . '/stderr-' . bin2hex(random_bytes(3));
+        $script = $directory . '/endpoint.php';
+        if (!is_file($script)) {
+            file_put_contents($script, $this->endpointScript());
+        }
+        $clientScript = $directory . '/runtime-client.php';
+        if (!is_file($clientScript)) {
+            file_put_contents($clientScript, $this->runtimeClientScript());
+        }
+        $environment = getenv();
+        self::assertIsArray($environment);
+        $environment['TLS_MODE'] = 'success';
+        $environment['TLS_BIND'] = 'tcp://127.0.0.1:0';
+        $environment['TLS_CERT'] = $serverPem;
+        $environment['TLS_GREETING'] = base64_encode($this->greeting(true));
+        $environment['TLS_READY'] = $ready;
+        $environment['TLS_SNI'] = $directory . '/unused-sni';
+        $server = proc_open([PHP_BINARY, $script], [
+            1 => ['file', '/dev/null', 'w'],
+            2 => ['file', $serverStderr, 'w'],
+        ], $pipes, null, $environment);
+        self::assertIsResource($server);
+
+        try {
+            $address = $this->waitForFile($ready);
+            $clientStderr = $directory . '/client-stderr-' . bin2hex(random_bytes(3));
+            $client = proc_open([
+                PHP_BINARY,
+                '-d',
+                'openssl.cafile=' . $runtimeCafile,
+                '-d',
+                'openssl.capath=' . $runtimeCapath,
+                $clientScript,
+            ], [
+                1 => ['pipe', 'w'],
+                2 => ['file', $clientStderr, 'w'],
+            ], $clientPipes, null, [
+                'AUTOLOAD' => dirname(__DIR__, 3) . '/vendor/autoload.php',
+                'TLS_HOST' => $host,
+                'TLS_PORT' => (string)$this->portFrom($address),
+            ]);
+            self::assertIsResource($client);
+            $stdout = stream_get_contents($clientPipes[1]);
+            fclose($clientPipes[1]);
+            $exitCode = proc_close($client);
+            $stderr = (is_file($serverStderr) ? (string)file_get_contents($serverStderr) : '')
+                . (is_file($clientStderr) ? (string)file_get_contents($clientStderr) : '');
+            self::assertSame(0, $exitCode, $stderr . $stdout);
+            $decoded = json_decode((string)$stdout, true);
+            self::assertIsArray($decoded, $stderr . $stdout);
+            $writes = [];
+            foreach ($decoded['writes'] as $write) {
+                $packet = base64_decode((string)$write, true);
+                self::assertNotFalse($packet);
+                $writes[] = $packet;
+            }
+
+            return [
+                'writes' => $writes,
+                'code' => $decoded['code'],
+                'message' => (string)$decoded['message'],
+                'stderr' => $stderr,
+                'anchorFile' => (string)$decoded['anchorFile'],
+                'anchorDirectory' => (string)$decoded['anchorDirectory'],
+            ];
+        } finally {
+            $status = proc_get_status($server);
+            if ($status['running']) {
+                proc_terminate($server);
+            }
+            proc_close($server);
+        }
+    }
+
+    private function runtimeClientScript(): string
+    {
+        return <<<'PHP'
+<?php
+declare(strict_types=1);
+require getenv('AUTOLOAD');
+
+use MySQLReplication\BinLog\BinLogSocketConnect;
+use MySQLReplication\Config\ConfigBuilder;
+use MySQLReplication\Exception\MySQLReplicationException;
+use MySQLReplication\Repository\FieldDTOCollection;
+use MySQLReplication\Repository\MasterStatusDTO;
+use MySQLReplication\Repository\RepositoryInterface;
+use MySQLReplication\Socket\Socket;
+use MySQLReplication\Socket\SocketInterface;
+use Psr\Log\NullLogger;
+
+final class RuntimeStoreRepository implements RepositoryInterface
+{
+    public function getFields(string $database, string $table): FieldDTOCollection
+    {
+        throw new RuntimeException('not used');
+    }
+
+    public function isCheckSum(): bool
+    {
+        return false;
+    }
+
+    public function getVersion(): string
+    {
+        return '8.0.36';
+    }
+
+    public function getMasterStatus(): MasterStatusDTO
+    {
+        throw new RuntimeException('not used');
+    }
+}
+
+final class RuntimeStoreSocket implements SocketInterface
+{
+    /** @var list<string> */
+    public array $writes = [];
+    public string $anchorFile = '';
+    public string $anchorDirectory = '';
+
+    public function __construct(private readonly Socket $socket)
+    {
+    }
+
+    public function connectToStream(string $host, int $port): void
+    {
+        $this->socket->connectToStream($host, $port);
+    }
+
+    public function readFromSocket(int $length): string
+    {
+        return $this->socket->readFromSocket($length);
+    }
+
+    public function writeToSocket(string $data): void
+    {
+        $this->writes[] = $data;
+        $this->socket->writeToSocket($data);
+    }
+
+    public function enableTls(string $peerName, string $trustAnchorFile, string $trustAnchorDirectory): void
+    {
+        $this->anchorFile = $trustAnchorFile;
+        $this->anchorDirectory = $trustAnchorDirectory;
+        $this->socket->enableTls($peerName, $trustAnchorFile, $trustAnchorDirectory);
+    }
+}
+
+$socket = new RuntimeStoreSocket(new Socket());
+$config = (new ConfigBuilder())
+    ->withHost((string)getenv('TLS_HOST'))
+    ->withPort((int)getenv('TLS_PORT'))
+    ->withUser('replica')
+    ->withPassword('registration-secret')
+    ->withSlaveId(1)
+    ->withSlaveUuid('')
+    ->withBinLogFileName('binlog.000001')
+    ->withBinLogPosition('4')
+    ->build();
+$config->validate();
+$exception = null;
+try {
+    new BinLogSocketConnect(new RuntimeStoreRepository(), $socket, new NullLogger(), $config);
+} catch (MySQLReplicationException $caught) {
+    $exception = $caught;
+}
+fwrite(STDOUT, json_encode([
+    'writes' => array_map('base64_encode', $socket->writes),
+    'code' => $exception?->getCode(),
+    'message' => $exception?->getMessage() ?? '',
+    'anchorFile' => $socket->anchorFile,
+    'anchorDirectory' => $socket->anchorDirectory,
+], JSON_THROW_ON_ERROR));
+PHP;
     }
 
     /**

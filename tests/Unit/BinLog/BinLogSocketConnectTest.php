@@ -42,19 +42,27 @@ class BinLogSocketConnectTest extends TestCase
             ->willReturnCallback(static function (string $data) use (&$packets): void {
                 $packets[] = $data;
             });
+        $socket->expects(self::once())
+            ->method('enableTls')
+            ->with('127.0.0.1', '', '')
+            ->willReturnCallback(static function () use (&$packets): void {
+                self::assertSame([self::tlsRequest()], $packets);
+            });
 
         new BinLogSocketConnect($repository, $socket, new NullLogger(), $config);
 
-        self::assertCount(3, $packets);
+        self::assertCount(4, $packets);
+        self::assertSame(self::tlsRequest(), $packets[0]);
         // Known native-password responses for salt "12345678abcdefghijkl" keep authentication covered.
-        self::assertStringEndsWith("\x14" . hex2bin($authenticationHex) . "mysql_native_password\x00", $packets[0]);
+        self::assertStringStartsWith("\x53\x00\x00\x02", $packets[1]);
+        self::assertStringEndsWith("\x14" . hex2bin($authenticationHex) . "mysql_native_password\x00", $packets[1]);
         $host = (string)gethostname();
         // Command, server ID, hostname, username, empty password, port 3307, rank 0 and master ID 0.
         $registration = "\x15\x04\x03\x02\x01" . chr(strlen($host)) . $host
             . "\x07replica\x00\xeb\x0c\x00\x00\x00\x00\x00\x00\x00\x00";
-        self::assertSame(pack('V', strlen($registration)) . $registration, $packets[1]);
+        self::assertSame(pack('V', strlen($registration)) . $registration, $packets[2]);
         // The next packet must still request position 4, flags 0 and the configured server ID and file.
-        self::assertSame("\x18\x00\x00\x00\x12\x04\x00\x00\x00\x00\x00\x04\x03\x02\x01binlog.000001", $packets[2]);
+        self::assertSame("\x18\x00\x00\x00\x12\x04\x00\x00\x00\x00\x00\x04\x03\x02\x01binlog.000001", $packets[3]);
     }
 
     public static function passwords(): iterable
@@ -88,18 +96,18 @@ class BinLogSocketConnectTest extends TestCase
             // Writes so far, requested byte count, server bytes.
             [0, 4, pack('V', strlen($greeting))],
             [0, strlen($greeting), $greeting],
-            [1, 4, "\x2c\x00\x00\x02"],
-            [1, 44, $authSwitch],
-            [3, 4, "\x01\x00\x00\x04"],
-            [3, 1, "\x00"],
-            [4, 4, "\x01\x00\x00\x01"],
+            [2, 4, "\x2c\x00\x00\x03"],
+            [2, 44, $authSwitch],
+            [4, 4, "\x01\x00\x00\x04"],
             [4, 1, "\x00"],
             [5, 4, "\x01\x00\x00\x01"],
             [5, 1, "\x00"],
             [6, 4, "\x01\x00\x00\x01"],
             [6, 1, "\x00"],
-            [6, 4, "\x0d\x00\x00\x01"],
-            [6, 13, "\x00binlog-event"],
+            [7, 4, "\x01\x00\x00\x01"],
+            [7, 1, "\x00"],
+            [7, 4, "\x0d\x00\x00\x01"],
+            [7, 13, "\x00binlog-event"],
         ];
         $socket->expects(self::exactly(count($reads)))->method('readFromSocket')
             ->willReturnCallback(static function (int $length) use (&$reads, &$packets): string {
@@ -109,19 +117,26 @@ class BinLogSocketConnectTest extends TestCase
 
                 return $data;
             });
-        $socket->expects(self::exactly(6))->method('writeToSocket')
+        $socket->expects(self::exactly(7))->method('writeToSocket')
             ->willReturnCallback(static function (string $data) use (&$packets): void {
                 $packets[] = $data;
+            });
+        $socket->expects(self::once())
+            ->method('enableTls')
+            ->with('localhost', '', '')
+            ->willReturnCallback(static function () use (&$packets): void {
+                self::assertSame([self::tlsRequest()], $packets);
             });
 
         $connection = new BinLogSocketConnect($repository, $socket, new NullLogger(), $config);
 
         $authPayload = "\x15\xa2\x08\x00\xff\xff\xff\x00\x21" . str_repeat("\x00", 23)
             . "replica\x00\x14" . hex2bin('56e848b0ae78f2f8a875291af4fe86cd420c7088') . "mysql_native_password\x00";
-        self::assertSame("\x53\x00\x00\x01" . $authPayload, $packets[0]);
-        self::assertSame("\x14\x00\x00\x03" . hex2bin('e3957560abd3f8c7291446a2ccdfb1beab96c7f4'), $packets[1]);
-        self::assertSame("\x37\x00\x00\x00\x03SET @master_binlog_checksum = @@global.binlog_checksum", $packets[2]);
-        self::assertSame("\x29\x00\x00\x00\x03SET @master_heartbeat_period = 500000000", $packets[3]);
+        self::assertSame(self::tlsRequest(), $packets[0]);
+        self::assertSame("\x53\x00\x00\x02" . $authPayload, $packets[1]);
+        self::assertSame("\x14\x00\x00\x04" . hex2bin('e3957560abd3f8c7291446a2ccdfb1beab96c7f4'), $packets[2]);
+        self::assertSame("\x37\x00\x00\x00\x03SET @master_binlog_checksum = @@global.binlog_checksum", $packets[3]);
+        self::assertSame("\x29\x00\x00\x00\x03SET @master_heartbeat_period = 500000000", $packets[4]);
         self::assertTrue($connection->getCheckSum());
         self::assertSame("\x00binlog-event", $connection->getResponse());
     }
@@ -144,9 +159,15 @@ class BinLogSocketConnectTest extends TestCase
             ->willReturn('8.0.36');
         $socket = $this->socketWithBasicStartupResponses();
         $packets = [];
-        $socket->expects(self::exactly(3))->method('writeToSocket')
+        $socket->expects(self::exactly(4))->method('writeToSocket')
             ->willReturnCallback(static function (string $data) use (&$packets): void {
                 $packets[] = $data;
+            });
+        $socket->expects(self::once())
+            ->method('enableTls')
+            ->with('localhost', '', '')
+            ->willReturnCallback(static function () use (&$packets): void {
+                self::assertSame([self::tlsRequest()], $packets);
             });
 
         $connection = new BinLogSocketConnect($repository, $socket, new NullLogger(), $config);
@@ -157,7 +178,8 @@ class BinLogSocketConnectTest extends TestCase
         // Set data length, SID count 1, SID, then the interval count and endpoints.
         $set = $setLength . "\x01\x00\x00\x00\x00\x00\x00\x00"
             . "\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff" . $intervals;
-        self::assertSame($prefix . $set, $packets[2]);
+        self::assertSame(self::tlsRequest(), $packets[0]);
+        self::assertSame($prefix . $set, $packets[3]);
         self::assertSame($config->gtid, $connection->getBinLogCurrent()->getGtid());
     }
 
@@ -196,6 +218,11 @@ class BinLogSocketConnectTest extends TestCase
             );
 
         return $socket;
+    }
+
+    private static function tlsRequest(): string
+    {
+        return "\x20\x00\x00\x01\x15\xaa\x08\x00\xff\xff\xff\x00\x21" . str_repeat("\x00", 23);
     }
 
     private static function nativePasswordGreeting(): string
