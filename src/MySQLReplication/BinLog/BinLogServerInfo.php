@@ -19,7 +19,8 @@ readonly class BinLogServerInfo
         public string $salt,
         public BinLogAuthPluginMode $authPlugin,
         public string $versionName,
-        public float $versionRevision
+        public float $versionRevision,
+        public int $capabilityFlags = 0,
     ) {
     }
 
@@ -57,6 +58,7 @@ readonly class BinLogServerInfo
         ++$i;
 
         //capability_flag_1 (2) -- lower 2 bytes of the Protocol::CapabilityFlags (optional)
+        $capabilityFlags = ord($data[$i]) | (ord($data[$i + 1]) << 8);
         $i += 2;
 
         //character_set (1) -- default server character-set, only the lower 8-bits Protocol::CharacterSet (optional)
@@ -67,6 +69,7 @@ readonly class BinLogServerInfo
         $i += 2;
 
         //capability_flags_2 (2) -- upper 2 bytes of the Protocol::CapabilityFlags
+        $capabilityFlags |= (ord($data[$i]) | (ord($data[$i + 1]) << 8)) << 16;
         $i += 2;
 
         //auth_plugin_data_len (1) -- length of the combined auth_plugin_data, if auth_plugin_data_len is > 0
@@ -96,7 +99,8 @@ readonly class BinLogServerInfo
             $salt,
             BinLogAuthPluginMode::make($authPlugin),
             self::parseVersion($serverVersion),
-            self::parseRevision($version)
+            self::parseRevision($version),
+            $capabilityFlags
         );
     }
 

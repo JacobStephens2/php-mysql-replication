@@ -46,6 +46,10 @@ class ConfigBuilder
 
     private string $slaveUuid = '0015d2b6-8a06-4e5e-8c07-206ef3fbd274';
 
+    private string $trustAnchorFile = '';
+
+    private string $trustAnchorDirectory = '';
+
     public function withSlaveUuid(string $slaveUuid): self
     {
         $this->slaveUuid = $slaveUuid;
@@ -180,6 +184,20 @@ class ConfigBuilder
         return $this;
     }
 
+    public function withTrustAnchorFile(string $trustAnchorFile): self
+    {
+        $this->trustAnchorFile = $trustAnchorFile;
+
+        return $this;
+    }
+
+    public function withTrustAnchorDirectory(string $trustAnchorDirectory): self
+    {
+        $this->trustAnchorDirectory = $trustAnchorDirectory;
+
+        return $this;
+    }
+
     /**
      * @see https://dev.mysql.com/doc/refman/5.6/en/change-master-to.html
      */
@@ -213,6 +231,8 @@ class ConfigBuilder
             $this->slaveUuid,
             $this->tablesRegex,
             $this->databasesRegex,
+            $this->trustAnchorFile,
+            $this->trustAnchorDirectory,
         );
     }
 }

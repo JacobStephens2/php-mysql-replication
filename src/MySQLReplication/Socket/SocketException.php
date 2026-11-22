@@ -14,4 +14,6 @@ class SocketException extends MySQLReplicationException
     public const SOCKET_UNABLE_TO_WRITE_CODE = 101;
     public const SOCKET_UNABLE_TO_CREATE_MESSAGE = 'Unable to create socket: ';
     public const SOCKET_UNABLE_TO_CREATE_CODE = 102;
+    public const SOCKET_TLS_FAILED_MESSAGE = 'TLS upgrade failed: ';
+    public const SOCKET_TLS_FAILED_CODE = 103;
 }

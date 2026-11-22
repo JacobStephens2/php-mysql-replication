@@ -19,6 +19,9 @@ class BinLogSocketConnect
     private const COM_BINLOG_DUMP_GTID = 0x1e;
     private const AUTH_SWITCH_PACKET = 254;
     private const AUTH_MAX_PACKET_SIZE = 0xffffff;
+    private const CLIENT_SSL = 1 << 11;
+    private const HANDSHAKE_CHARSET = 33;
+    private const HANDSHAKE_FILLER_LENGTH = 23;
 
     private readonly BinLogPacketStream $packetStream;
     private bool $checkSum = false;
@@ -27,7 +30,7 @@ class BinLogSocketConnect
 
     public function __construct(
         private readonly RepositoryInterface $repository,
-        SocketInterface $socket,
+        private readonly SocketInterface $socket,
         private readonly LoggerInterface $logger,
         private readonly Config $config
     ) {
@@ -78,21 +81,27 @@ class BinLogSocketConnect
             'Trying to authenticate user: ' . $this->config->user . ' using ' . $authPlugin->value . ' default plugin'
         );
 
+        $sequenceId = 1;
+        if ($this->config->hasTrustAnchor()) {
+            $this->upgradeToVerifiedTls($sequenceId);
+            ++$sequenceId;
+        }
+
         $data = pack('L', self::getCapabilities());
         $data .= pack('L', self::AUTH_MAX_PACKET_SIZE);
-        $data .= chr(33);
-        $data .= str_repeat(chr(0), 23);
+        $data .= chr(self::HANDSHAKE_CHARSET);
+        $data .= str_repeat(chr(0), self::HANDSHAKE_FILLER_LENGTH);
         $data .= $this->config->user . chr(0);
         $auth = $this->getAuthData($authPlugin, $this->binLogServerInfo->salt);
         $data .= chr(strlen($auth)) . $auth;
         $data .= $authPlugin->value . chr(0);
 
-        $this->packetStream->writePayload($data, 1);
+        $this->packetStream->writePayload($data, $sequenceId);
         $response = $this->getResponse();
 
         // Check for AUTH_SWITCH_PACKET
         if (isset($response[0]) && ord($response[0]) === self::AUTH_SWITCH_PACKET) {
-            $this->switchAuth($response);
+            $this->switchAuth($response, $sequenceId + 2);
         }
 
         $this->logger->debug('User authenticated');
@@ -141,6 +150,30 @@ class BinLogSocketConnect
         $authPlugin = 1 << 19;
 
         return $longPassword | $longFlag | $transactions | $protocol41 | $secureConnection | $noSchema | $authPlugin;
+    }
+
+    /**
+     * Protocol::SSLRequest. Credentials are written only after the certificate check succeeds.
+     */
+    private function upgradeToVerifiedTls(int $sequenceId): void
+    {
+        if (($this->binLogServerInfo->capabilityFlags & self::CLIENT_SSL) === 0) {
+            throw new BinLogException(
+                BinLogException::TLS_NOT_OFFERED_MESSAGE,
+                BinLogException::TLS_NOT_OFFERED_CODE
+            );
+        }
+
+        $data = pack('L', self::getCapabilities() | self::CLIENT_SSL);
+        $data .= pack('L', self::AUTH_MAX_PACKET_SIZE);
+        $data .= chr(self::HANDSHAKE_CHARSET);
+        $data .= str_repeat(chr(0), self::HANDSHAKE_FILLER_LENGTH);
+        $this->packetStream->writePayload($data, $sequenceId);
+        $this->socket->enableTls(
+            $this->config->host,
+            $this->config->trustAnchorFile,
+            $this->config->trustAnchorDirectory
+        );
     }
 
     private function getBinlogStream(): void
@@ -283,7 +316,7 @@ class BinLogSocketConnect
         $this->logger->debug('Set binlog to start from: ' . $binFileName . ':' . $binFilePos);
     }
 
-    private function switchAuth(string $response): void
+    private function switchAuth(string $response, int $sequenceId): void
     {
         // skip AUTH_SWITCH_PACKET byte
         $offset = 1;
@@ -293,6 +326,6 @@ class BinLogSocketConnect
 
         $this->logger->debug('Auth switch packet received, switching to ' . $authPluginSwitched->value);
 
-        $this->packetStream->writePayload($auth, 3);
+        $this->packetStream->writePayload($auth, $sequenceId);
     }
 }
