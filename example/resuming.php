@@ -23,6 +23,8 @@ $binLogStream = new MySQLReplicationFactory(
         ->withHost('127.0.0.1')
         ->withPort(3306)
         ->withPassword('root')
+        // Omit both trust-anchor calls to use the runtime default trust store. The host check still runs.
+        ->withTrustAnchorFile(__DIR__ . '/../.mysql-certs/ca.pem')
         ->build()
 );
 

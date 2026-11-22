@@ -82,10 +82,8 @@ class BinLogSocketConnect
         );
 
         $sequenceId = 1;
-        if ($this->config->hasTrustAnchor()) {
-            $this->upgradeToVerifiedTls($sequenceId);
-            ++$sequenceId;
-        }
+        $this->upgradeToVerifiedTls($sequenceId);
+        ++$sequenceId;
 
         $data = $this->handshakePreface(self::getCapabilities());
         $data .= $this->config->user . chr(0);

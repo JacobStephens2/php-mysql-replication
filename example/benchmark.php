@@ -26,6 +26,7 @@ class benchmark
     private const DB_PASS = 'root';
     private const DB_HOST = '127.0.0.1';
     private const DB_PORT = 3306;
+    private const TRUST_ANCHOR_FILE = __DIR__ . '/../.mysql-certs/ca.pem';
 
     private MySQLReplicationFactory $binLogStream;
 
@@ -47,6 +48,8 @@ class benchmark
                 ->withPassword(self::DB_PASS)
                 ->withHost(self::DB_HOST)
                 ->withPort(self::DB_PORT)
+                // Omit both trust-anchor calls to use the runtime default trust store. The host check still runs.
+                ->withTrustAnchorFile(self::TRUST_ANCHOR_FILE)
                 ->withEventsOnly(
                     [
                         ConstEventType::UPDATE_ROWS_EVENT_V2->value,

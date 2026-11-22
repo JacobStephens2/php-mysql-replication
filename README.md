@@ -80,6 +80,10 @@ Available options:
 
 'port' - your mysql host port (default 3306)
 
+'trustAnchorFile' - PEM trust anchor file for the replication TLS host check (optional)
+
+'trustAnchorDirectory' - directory of hashed trust anchors for that check (optional)
+
 'charset' - db connection charset (default utf8)
 
 'gtid' - GTID marker(s) to start from (format 9b1c8d18-2a76-11e5-a26b-000c2976f3f3:1-177592)
@@ -107,6 +111,10 @@ Available options:
 'heartbeatPeriod' - sets the interval in seconds between replication heartbeats. Whenever the master's binary log is updated with an event, the waiting period for the next heartbeat is reset. interval is a decimal value having the range 0 to 4294967 seconds and a resolution in milliseconds; the smallest nonzero value is 0.001. Heartbeats are sent by the master only if there are no unsent events in the binary log file for a period longer than interval.
 
 'slaveUuid' - sets slave uuid for identification (default: 0015d2b6-8a06-4e5e-8c07-206ef3fbd274)
+
+Every replication connection requests TLS and checks the server certificate against the configured host before it writes the client authentication handshake. The host must be a DNS name or an IP address that the certificate names. When neither trust anchor setting is set, that check uses the runtime default trust store and still runs. When either setting is set, only the configured anchors are trusted. `ConfigBuilder` exposes them as `withTrustAnchorFile()` and `withTrustAnchorDirectory()`.
+
+The compose MySQL service and the CI MySQL services present a certificate for `127.0.0.1`. `sh docker/mysql-tls-certificates.sh .mysql-certs` writes that certificate and its trust anchor to `.mysql-certs/ca.pem`. Those servers still accept the unencrypted metadata SQL connection.
 
 Similar projects
 =========
