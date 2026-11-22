@@ -227,4 +227,75 @@ class ConfigTest extends TestCase
         $config = (new ConfigBuilder())->{'with' . strtoupper($configKey)}($configValue)->build();
         $config->validate();
     }
+
+    public function testUnreadableTrustAnchorFileFailsValidation(): void
+    {
+        $directory = sys_get_temp_dir() . '/trust-anchor-file-' . bin2hex(random_bytes(4));
+        mkdir($directory);
+        $file = $directory . '/ca.pem';
+        file_put_contents($file, "anchor\n");
+        chmod($file, 0000);
+
+        try {
+            $config = (new ConfigBuilder())->withTrustAnchorFile($file)
+                ->build();
+            $config->validate();
+            self::fail('An unreadable trust-anchor file passed validation.');
+        } catch (ConfigException $exception) {
+            self::assertSame(ConfigException::TRUST_ANCHOR_FILE_ERROR_MESSAGE, $exception->getMessage());
+            self::assertSame(ConfigException::TRUST_ANCHOR_FILE_ERROR_CODE, $exception->getCode());
+        } finally {
+            chmod($file, 0600);
+            unlink($file);
+            rmdir($directory);
+        }
+    }
+
+    public function testUnreadableTrustAnchorDirectoryFailsValidation(): void
+    {
+        $directory = sys_get_temp_dir() . '/trust-anchor-dir-' . bin2hex(random_bytes(4));
+        mkdir($directory);
+        chmod($directory, 0000);
+
+        try {
+            $config = (new ConfigBuilder())->withTrustAnchorDirectory($directory)
+                ->build();
+            $config->validate();
+            self::fail('An unreadable trust-anchor directory passed validation.');
+        } catch (ConfigException $exception) {
+            self::assertSame(ConfigException::TRUST_ANCHOR_DIRECTORY_ERROR_MESSAGE, $exception->getMessage());
+            self::assertSame(ConfigException::TRUST_ANCHOR_DIRECTORY_ERROR_CODE, $exception->getCode());
+        } finally {
+            chmod($directory, 0700);
+            rmdir($directory);
+        }
+    }
+
+    public function testReadableTrustAnchorsRemainOptional(): void
+    {
+        $directory = sys_get_temp_dir() . '/trust-anchor-ok-' . bin2hex(random_bytes(4));
+        mkdir($directory);
+        $file = $directory . '/ca.pem';
+        file_put_contents($file, "anchor\n");
+
+        try {
+            $configured = (new ConfigBuilder())
+                ->withTrustAnchorFile($file)
+                ->withTrustAnchorDirectory($directory)
+                ->build();
+            $configured->validate();
+            self::assertSame($file, $configured->trustAnchorFile);
+            self::assertSame($directory, $configured->trustAnchorDirectory);
+            self::assertTrue($configured->hasTrustAnchor());
+
+            $unset = (new ConfigBuilder())->build();
+            $unset->validate();
+            self::assertSame('', $unset->trustAnchorFile);
+            self::assertSame('', $unset->trustAnchorDirectory);
+            self::assertFalse($unset->hasTrustAnchor());
+        } finally {
+            unlink($file);
+            rmdir($directory);
+        }
+    }
 }

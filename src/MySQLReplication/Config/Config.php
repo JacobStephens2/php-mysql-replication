@@ -29,6 +29,8 @@ readonly class Config implements JsonSerializable
         public string $slaveUuid,
         private array $tablesRegex = [],
         private array $databasesRegex = [],
+        public string $trustAnchorFile = '',
+        public string $trustAnchorDirectory = '',
     ) {
     }
 
@@ -100,6 +102,29 @@ readonly class Config implements JsonSerializable
                 ConfigException::HEARTBEAT_PERIOD_ERROR_CODE
             );
         }
+        if ($this->trustAnchorFile !== '') {
+            clearstatcache(true, $this->trustAnchorFile);
+            if (!is_file($this->trustAnchorFile) || !is_readable($this->trustAnchorFile)) {
+                throw new ConfigException(
+                    ConfigException::TRUST_ANCHOR_FILE_ERROR_MESSAGE,
+                    ConfigException::TRUST_ANCHOR_FILE_ERROR_CODE
+                );
+            }
+        }
+        if ($this->trustAnchorDirectory !== '') {
+            clearstatcache(true, $this->trustAnchorDirectory);
+            if (!is_dir($this->trustAnchorDirectory) || !is_readable($this->trustAnchorDirectory)) {
+                throw new ConfigException(
+                    ConfigException::TRUST_ANCHOR_DIRECTORY_ERROR_MESSAGE,
+                    ConfigException::TRUST_ANCHOR_DIRECTORY_ERROR_CODE
+                );
+            }
+        }
+    }
+
+    public function hasTrustAnchor(): bool
+    {
+        return $this->trustAnchorFile !== '' || $this->trustAnchorDirectory !== '';
     }
 
 

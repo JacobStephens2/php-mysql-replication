@@ -11,4 +11,6 @@ interface SocketInterface
     public function readFromSocket(int $length): string;
 
     public function writeToSocket(string $data): void;
+
+    public function enableTls(string $peerName, string $trustAnchorFile, string $trustAnchorDirectory): void;
 }
