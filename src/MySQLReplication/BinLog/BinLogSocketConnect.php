@@ -13,28 +13,28 @@ use Psr\Log\LoggerInterface;
 
 class BinLogSocketConnect
 {
+    private const COM_QUERY = 0x03;
     private const COM_BINLOG_DUMP = 0x12;
     private const COM_REGISTER_SLAVE = 0x15;
     private const COM_BINLOG_DUMP_GTID = 0x1e;
     private const AUTH_SWITCH_PACKET = 254;
-    /**
-     * https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html 00 FE
-     */
-    private array $packageOkHeader = [0, 1, 254];
-    private int $binaryDataMaxLength = 16777215;
+    private const AUTH_MAX_PACKET_SIZE = 0xffffff;
+
+    private readonly BinLogPacketStream $packetStream;
     private bool $checkSum = false;
     private BinLogCurrent $binLogCurrent;
     private BinLogServerInfo $binLogServerInfo;
 
     public function __construct(
         private readonly RepositoryInterface $repository,
-        private readonly SocketInterface $socket,
+        SocketInterface $socket,
         private readonly LoggerInterface $logger,
         private readonly Config $config
     ) {
         $this->binLogCurrent = new BinLogCurrent();
+        $this->packetStream = new BinLogPacketStream($socket);
 
-        $this->socket->connectToStream($config->host, $config->port);
+        $socket->connectToStream($config->host, $config->port);
 
         $this->logger->debug('Connected to ' . $config->host . ':' . $config->port);
 
@@ -59,31 +59,7 @@ class BinLogSocketConnect
 
     public function getResponse(bool $checkResponse = true): string
     {
-        $header = $this->socket->readFromSocket(4);
-        if ($header === '') {
-            return '';
-        }
-        $dataLength = BinaryDataReader::unpack('L', $header[0] . $header[1] . $header[2] . chr(0))[1];
-        $isMaxDataLength = $dataLength === $this->binaryDataMaxLength;
-
-        $result = $this->socket->readFromSocket($dataLength);
-        if ($checkResponse === true) {
-            $this->isWriteSuccessful($result);
-        }
-
-        // https://dev.mysql.com/doc/internals/en/sending-more-than-16mbyte.html
-        while ($isMaxDataLength) {
-            $header = $this->socket->readFromSocket(4);
-            if ($header === '') {
-                return $result;
-            }
-            $dataLength = BinaryDataReader::unpack('L', $header[0] . $header[1] . $header[2] . chr(0))[1];
-            $isMaxDataLength = $dataLength === $this->binaryDataMaxLength;
-            $next_result = $this->socket->readFromSocket($dataLength);
-            $result .= $next_result;
-        }
-
-        return $result;
+        return $this->packetStream->readResponse($checkResponse);
     }
 
     public function getBinLogCurrent(): BinLogCurrent
@@ -96,21 +72,6 @@ class BinLogSocketConnect
         return $this->checkSum;
     }
 
-    private function isWriteSuccessful(string $data): void
-    {
-        $head = ord($data[0]);
-        if (!in_array($head, $this->packageOkHeader, true)) {
-            $errorCode = BinaryDataReader::unpack('v', $data[1] . $data[2])[1];
-            $errorMessage = '';
-            $packetLength = strlen($data);
-            for ($i = 9; $i < $packetLength; ++$i) {
-                $errorMessage .= $data[$i];
-            }
-
-            throw new BinLogException($errorMessage, $errorCode);
-        }
-    }
-
     private function authenticate(BinLogAuthPluginMode $authPlugin): void
     {
         $this->logger->debug(
@@ -118,18 +79,15 @@ class BinLogSocketConnect
         );
 
         $data = pack('L', self::getCapabilities());
-        $data .= pack('L', $this->binaryDataMaxLength);
+        $data .= pack('L', self::AUTH_MAX_PACKET_SIZE);
         $data .= chr(33);
         $data .= str_repeat(chr(0), 23);
         $data .= $this->config->user . chr(0);
         $auth = $this->getAuthData($authPlugin, $this->binLogServerInfo->salt);
         $data .= chr(strlen($auth)) . $auth;
         $data .= $authPlugin->value . chr(0);
-        $str = pack('L', strlen($data));
-        $s = $str[0] . $str[1] . $str[2];
-        $data = $s . chr(1) . $data;
 
-        $this->socket->writeToSocket($data);
+        $this->packetStream->writePayload($data, 1);
         $response = $this->getResponse();
 
         // Check for AUTH_SWITCH_PACKET
@@ -226,7 +184,7 @@ class BinLogSocketConnect
 
     private function executeSQL(string $sql): void
     {
-        $this->socket->writeToSocket(pack('LC', strlen($sql) + 1, 0x03) . $sql);
+        $this->packetStream->writePayload(chr(self::COM_QUERY) . $sql);
         $this->getResponse();
     }
 
@@ -239,8 +197,7 @@ class BinLogSocketConnect
         $hostLength = strlen($host);
         $userLength = strlen($this->config->user);
 
-        $data = pack('l', 18 + $hostLength + $userLength);
-        $data .= chr(self::COM_REGISTER_SLAVE);
+        $data = chr(self::COM_REGISTER_SLAVE);
         $data .= pack('V', $this->config->slaveId);
         $data .= pack('C', $hostLength);
         $data .= $host;
@@ -251,7 +208,7 @@ class BinLogSocketConnect
         $data .= pack('V', 0);
         $data .= pack('V', 0);
 
-        $this->socket->writeToSocket($data);
+        $this->packetStream->writePayload($data);
         $this->getResponse();
 
         $this->logger->debug('Slave registered with id ' . $this->config->slaveId);
@@ -271,9 +228,10 @@ class BinLogSocketConnect
 
     private function setBinLogDumpGtid(): void
     {
-        $collection = GtidCollection::makeCollectionFromString($this->config->gtid);
+        $encodedGtidSet = GtidCollection::makeCollectionFromString($this->config->gtid)->getEncoded();
+        $encodedGtidSetLength = strlen($encodedGtidSet);
 
-        $data = pack('l', 26 + $collection->getEncodedLength()) . chr(self::COM_BINLOG_DUMP_GTID);
+        $data = chr(self::COM_BINLOG_DUMP_GTID);
         $data .= pack('S', 0);
         $data .= pack('I', $this->config->slaveId);
         $data .= pack('I', 3);
@@ -281,10 +239,10 @@ class BinLogSocketConnect
         $data .= chr(0);
         $data .= chr(0);
         $data .= BinaryDataReader::pack64bit(4);
-        $data .= pack('I', $collection->getEncodedLength());
-        $data .= $collection->getEncoded();
+        $data .= pack('V', $encodedGtidSetLength);
+        $data .= $encodedGtidSet;
 
-        $this->socket->writeToSocket($data);
+        $this->packetStream->writePayload($data);
         $this->getResponse();
 
         $this->binLogCurrent->setGtid($this->config->gtid);
@@ -310,13 +268,13 @@ class BinLogSocketConnect
             $binFileName = $masterStatusDTO->file;
         }
 
-        $data = pack('i', strlen($binFileName) + 11) . chr(self::COM_BINLOG_DUMP);
+        $data = chr(self::COM_BINLOG_DUMP);
         $data .= pack('I', $binFilePos);
         $data .= pack('v', 0);
         $data .= pack('I', $this->config->slaveId);
         $data .= $binFileName;
 
-        $this->socket->writeToSocket($data);
+        $this->packetStream->writePayload($data);
         $this->getResponse();
 
         $this->binLogCurrent->setBinLogPosition($binFilePos);
@@ -335,6 +293,6 @@ class BinLogSocketConnect
 
         $this->logger->debug('Auth switch packet received, switching to ' . $authPluginSwitched->value);
 
-        $this->socket->writeToSocket(pack('L', (strlen($auth)) | (3 << 24)) . $auth);
+        $this->packetStream->writePayload($auth, 3);
     }
 }
