@@ -73,6 +73,22 @@ class VerifiedTlsUpgradeTest extends TestCase
         self::assertSame([$this->tlsRequest()], $result['writes']);
     }
 
+    public function testIpHostRejectsDnsNameOfThatAddressBeforeClientAuthentication(): void
+    {
+        $issued = $this->issue('DNS:127.0.0.1');
+        $result = $this->startup(
+            'success',
+            '127.0.0.1',
+            $issued['serverPem'],
+            ['file' => $issued['caPem'], 'directory' => ''],
+            $this->greeting(true)
+        );
+
+        self::assertInstanceOf(SocketException::class, $result['exception']);
+        self::assertSame(SocketException::SOCKET_TLS_FAILED_CODE, $result['exception']->getCode());
+        self::assertSame([$this->tlsRequest()], $result['writes']);
+    }
+
     public function testUntrustedIssuerAbortsBeforeClientAuthentication(): void
     {
         $issued = $this->issue('IP:127.0.0.1');

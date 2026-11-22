@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MySQLReplication\Socket;
 
+use OpenSSLCertificate;
 use Socket as NativeSocket;
 
 class Socket implements SocketInterface
@@ -148,6 +149,8 @@ class Socket implements SocketInterface
             'allow_self_signed' => false,
             'peer_name' => $peerName,
             'SNI_enabled' => !$isIp,
+            // PHP matches a dNSName equal to this address. An IP host requires an iPAddress name.
+            'capture_peer_cert' => $isIp,
         ];
         if ($cafile !== null) {
             $ssl['cafile'] = $cafile;
@@ -177,6 +180,48 @@ class Socket implements SocketInterface
                 SocketException::SOCKET_TLS_FAILED_CODE
             );
         }
+        if ($isIp && !$this->certificateNamesIp($peerName)) {
+            throw new SocketException(
+                SocketException::SOCKET_TLS_FAILED_MESSAGE . 'certificate does not contain a matching IP name',
+                SocketException::SOCKET_TLS_FAILED_CODE
+            );
+        }
+    }
+
+    private function certificateNamesIp(string $peerName): bool
+    {
+        $options = stream_context_get_options($this->openSocket());
+        $certificate = $options['ssl']['peer_certificate'] ?? null;
+        if (!$certificate instanceof OpenSSLCertificate) {
+            return false;
+        }
+        $parsed = openssl_x509_parse($certificate);
+        if (!is_array($parsed)) {
+            return false;
+        }
+        $subjectAltName = $parsed['extensions']['subjectAltName'] ?? '';
+        if (!is_string($subjectAltName) || $subjectAltName === '') {
+            return false;
+        }
+        $expected = inet_pton($peerName);
+        if (!is_string($expected)) {
+            return false;
+        }
+        $entries = preg_split('/,\s*/', $subjectAltName);
+        if ($entries === false) {
+            return false;
+        }
+        foreach ($entries as $entry) {
+            if (!str_starts_with($entry, 'IP Address:')) {
+                continue;
+            }
+            $actual = inet_pton(substr($entry, strlen('IP Address:')));
+            if (is_string($actual) && strlen($actual) === strlen($expected) && hash_equals($expected, $actual)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function firstCertificate(string $directory): ?string
